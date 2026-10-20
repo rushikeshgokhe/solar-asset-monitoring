@@ -6,3 +6,6 @@
 __pycache__/
 .pytest_cache/
 .aws/
+*.tfvars
+*.tfvars
+reports/screenshots/Screenshot*.png
