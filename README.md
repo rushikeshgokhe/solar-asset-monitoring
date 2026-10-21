@@ -1,281 +1,397 @@
-# Solar Asset Performance Monitoring & Incident Management System
+# Solar Asset Monitoring Platform on AWS
 
-<p align="center">
-  <strong>AWS • Python • Amazon S3 • AWS Lambda • Amazon SNS • Power BI</strong>
-</p>
+![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20Lambda%20%7C%20SNS%20%7C%20CloudWatch-FF9900?logo=amazonaws&logoColor=white)
+![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-15%20passing-brightgreen)
+![Region](https://img.shields.io/badge/region-ap--south--1-informational)
 
-## Overview
+An **event-driven, serverless monitoring pipeline** for solar inverter telemetry, provisioned entirely with **Terraform**.
+Uploading a CSV to S3 triggers a Python Lambda function that validates and analyses the data, writes an incident register back to S3, and sends an email summary through Amazon SNS.
 
-The **Solar Asset Performance Monitoring & Incident Management System** is a cloud-focused portfolio project that demonstrates how solar inverter telemetry can be collected as CSV data, analyzed for operational anomalies, and transformed into an incident register for reporting and alerting.
+> **Data notice:** this project uses **synthetic** solar telemetry only. It contains no employer, client or real operational data.
 
-The solution combines Python-based data processing with AWS services and a Power BI dashboard. It is designed to demonstrate practical skills in serverless processing, object storage, event-driven workflows, monitoring, incident analysis, and business intelligence.
+---
 
-> **Project data:** This portfolio implementation uses synthetic solar telemetry. It is intended for learning and demonstration and does not contain employer or client operational data.
+## Table of contents
 
-## Project Objectives
+1. [Why this project](#why-this-project)
+2. [Architecture](#architecture)
+3. [How it works](#how-it-works)
+4. [Tech stack](#tech-stack)
+5. [Repository structure](#repository-structure)
+6. [Infrastructure (Terraform)](#infrastructure-terraform)
+7. [Security design](#security-design)
+8. [Processing logic and data model](#processing-logic-and-data-model)
+9. [Tested results](#tested-results)
+10. [Screenshots](#screenshots)
+11. [Run it yourself](#run-it-yourself)
+12. [Run the tests](#run-the-tests)
+13. [Cost and clean-up](#cost-and-clean-up)
+14. [Design decisions](#design-decisions)
+15. [Known limitations](#known-limitations)
+16. [Roadmap](#roadmap)
+17. [Skills demonstrated](#skills-demonstrated)
+18. [Troubleshooting](#troubleshooting)
+19. [Author](#author)
 
-- Generate and validate structured solar telemetry data.
-- Store telemetry and processing outputs in Amazon S3.
-- Use AWS Lambda to process telemetry without managing servers.
-- Detect potential zero-power, high-temperature, and missing-telemetry conditions.
-- Save detected anomaly records as a CSV incident register.
-- Send an email summary through Amazon SNS when anomalies are detected.
-- Analyze incident patterns in Power BI using KPIs, charts, tables, and interactive filters.
-- Demonstrate cloud security practices through scoped IAM permissions and private S3 storage.
+---
 
-## Solution Architecture
+## Why this project
+
+Solar asset operators receive large volumes of inverter data and need to spot problems quickly. This project shows how to build that workflow with cloud-native building blocks and DevOps practices:
+
+- **Serverless and event-driven**: no servers to manage; processing starts when a file arrives.
+- **Infrastructure as Code**: the whole environment is created and destroyed with Terraform, so it is repeatable and reviewable.
+- **Least-privilege security**: private storage and narrowly scoped IAM permissions.
+- **Observable**: structured JSON logs in CloudWatch and email alerts through SNS.
+- **Tested**: the processing logic is separated from AWS code and covered by unit tests.
+
+---
+
+## Architecture
 
 ```mermaid
-flowchart TD
-    A[Synthetic Solar Telemetry CSV] --> B[Amazon S3: telemetry/]
-    B -->|S3 object-created event| C[AWS Lambda: SolarTelemetryProcessor]
-    C --> D[Parse and validate telemetry]
-    D --> E[Apply anomaly detection rules]
-    E --> F[Amazon S3: processed/incident_results.csv]
-    E --> G[Amazon SNS: SolarMonitoringAlerts]
-    G --> H[Email notification]
-    F --> I[Power BI Desktop]
-    I --> J[KPIs, incident charts, filters and details table]
-    C --> K[Amazon CloudWatch Logs]
+flowchart LR
+    U["Telemetry CSV"] -->|"upload"| S3IN["S3 bucket<br/>telemetry/ prefix"]
+    S3IN -->|"ObjectCreated event<br/>prefix telemetry/ and suffix .csv"| L["AWS Lambda<br/>Python 3.12"]
+    L -->|"writes incident CSV"| S3OUT["S3 bucket<br/>processed/ prefix"]
+    L -->|"publishes summary"| SNS["Amazon SNS topic"]
+    SNS --> M["Email alert"]
+    L -->|"JSON logs"| CW["CloudWatch Logs<br/>7-day retention"]
+    S3OUT -.->|"manual import"| PBI["Power BI dashboard"]
+    TF["Terraform"] -.->|"provisions"| S3IN
+    TF -.-> L
+    TF -.-> SNS
+    TF -.-> CW
 ```
 
-### Workflow
+---
 
-1. **Telemetry input:** Synthetic telemetry is generated as a CSV file.
-2. **Object storage:** The input file is stored in a private S3 bucket under the `telemetry/` prefix.
-3. **Event-driven processing:** An S3 object-created notification can invoke the Lambda function when a matching CSV object is uploaded.
-4. **Data processing:** Lambda reads the configured CSV, parses timestamps and measurements, and evaluates anomaly rules.
-5. **Incident output:** Detected anomaly records are written to `processed/incident_results.csv`.
-6. **Alerting:** If anomaly records are detected and the SNS topic is configured, Lambda publishes a summary message to Amazon SNS.
-7. **Observability:** Lambda execution information and diagnostic output are available in CloudWatch Logs.
-8. **Reporting:** The processed CSV is imported into Power BI for incident analysis and visualization.
+## How it works
 
-## Technology Stack
+1. **Upload.** A telemetry CSV is uploaded to the `telemetry/` prefix of a private S3 bucket.
+2. **Trigger.** S3 emits an `ObjectCreated` event. The bucket notification is filtered to the prefix `telemetry/` and the suffix `.csv`.
+3. **Process.** The Lambda function reads the **bucket name and object key from the event** (no hard-coded file names), parses and validates every row, and skips malformed rows while counting them.
+4. **Detect.** The rules engine evaluates each reading and builds a list of incident records.
+5. **Store.** Results are written to `processed/<input-name>_incidents.csv`.
+6. **Alert.** If incidents exist, Lambda publishes a summary (rows processed, rows skipped, incident counts by type) to an SNS topic, which emails the subscriber.
+7. **Observe.** Each run writes a structured JSON log line to CloudWatch Logs.
+8. **Report.** The incident CSV can be imported into Power BI for KPI cards, charts and filters.
 
-| Technology | Role in the project |
+**Recursion safety:** the trigger only fires for `telemetry/*.csv`, and Lambda writes only to `processed/`. The function can never invoke itself, and the handler also ignores any key outside `telemetry/` or without a `.csv` extension.
+
+---
+
+## Tech stack
+
+| Area | Tools |
 |---|---|
-| Python | Synthetic data generation, validation, CSV processing, and anomaly detection |
-| Amazon S3 | Storage for telemetry input and incident output |
-| AWS Lambda | Serverless telemetry processing |
-| Amazon SNS | Email notification delivery |
-| AWS IAM | Access control for Lambda and AWS resources |
-| Amazon CloudWatch Logs | Execution logs and troubleshooting |
-| Microsoft Power BI Desktop | Dashboarding, KPI reporting, and interactive analysis |
-| DAX | Measures for incident counts and severity analysis |
-| CSV and JSON | Data exchange and sample event payloads |
+| Cloud | AWS S3, Lambda (Python 3.12), SNS, IAM, CloudWatch Logs |
+| Infrastructure as Code | Terraform 1.10+, AWS provider 6.x, remote state in S3 with state locking |
+| Language and testing | Python 3.12, pytest, boto3 |
+| Reporting | Power BI Desktop, DAX |
+| Tooling | AWS CLI v2, Git, GitHub, VS Code |
 
-## Repository Structure
+---
+
+## Repository structure
 
 ```text
-solar-asset-monitoring-system/
+.
 ├── README.md
-├── .gitignore
+├── requirements-dev.txt          # pytest, boto3 (local development)
+├── pytest.ini                    # test configuration
+├── src/
+│   └── processor/
+│       ├── handler.py            # Lambda entry point (S3 event -> S3 + SNS)
+│       └── rules.py              # pure functions: parsing, rules, CSV output, summary
+├── tests/
+│   ├── test_rules.py             # rule boundaries, parsing, end-to-end
+│   └── test_handler.py           # recursion and file-type guards
+├── terraform/
+│   ├── versions.tf               # Terraform + provider versions, S3 backend
+│   ├── variables.tf              # alert_email, project
+│   ├── main.tf                   # S3, SNS, IAM, Lambda, trigger, log group
+│   └── outputs.tf                # bucket name, Lambda name, SNS topic ARN
+├── scripts/                      # helpers to generate and validate synthetic data
 ├── data/
-│   └── solar_telemetry.csv
-├── scripts/
-│   ├── generate_data.py
-│   ├── validate_data.py
-│   └── detect_incidents.py
-├── aws/
-│   ├── lambda/
-│   │   └── lambda_function.py
-│   └── events/
-│       └── s3_upload_test_event.json
-├── reports/
-│   ├── incident_register.csv
-│   ├── Solar_Asset_Performance_Dashboard.pbix
-│   └── screenshots/
-│       ├── power_bi_dashboard.png
-│       ├── lambda_execution.png
-│       ├── s3_input.png
-│       ├── s3_output.png
-│       └── sns_alert.png
-└── docs/
-    └── architecture.md
+│   └── solar_telemetry.csv       # synthetic telemetry (3,452 rows)
+└── reports/
+    ├── incident_register.csv     # sample incident output
+    ├── solar_telemetry_incidents.csv   # output from the deployed run
+    ├── *.pbix                    # Power BI dashboards
+    └── screenshots/              # deployment evidence
 ```
 
-Include the files that are actually present in your repository. The sample dataset, reports, and screenshots should contain synthetic or otherwise approved content only.
+---
 
-## Telemetry Data Model
+## Infrastructure (Terraform)
 
-The synthetic telemetry dataset uses fields such as:
+`terraform apply` creates **11 resources**:
 
-| Field | Description |
-|---|---|
-| `timestamp` | Timestamp of a telemetry reading |
-| `site_id` | Synthetic solar site identifier |
-| `inverter_id` | Synthetic inverter identifier |
-| `ac_power_kw` | AC power measurement in kilowatts |
-| `dc_voltage_v` | DC voltage measurement in volts |
-| `inverter_temp_c` | Inverter temperature in degrees Celsius |
-| `ghi_w_m2` | Global horizontal irradiance in watts per square metre |
-| `energy_kwh_interval` | Energy produced during the interval |
-| `expected_scenario` | Scenario label used by the synthetic-data generator, when present |
-
-The example dataset used during testing contained approximately **3,452 telemetry rows** across four synthetic sites and multiple inverters.
-
-## Anomaly Detection Rules
-
-The Lambda processing logic evaluates the following illustrative rules:
-
-| Incident type | Detection condition | Severity |
+| # | Resource | Purpose |
 |---|---|---|
-| `ZERO_POWER` | Irradiance is at least 200 W/m² while AC power is at most 1 kW | HIGH |
-| `HIGH_TEMPERATURE` | Inverter temperature is at least 80°C | HIGH |
-| `MISSING_TELEMETRY` | The time gap between consecutive readings for the same site and inverter exceeds five minutes | MEDIUM |
+| 1 | `random_id` | Random suffix so the bucket name is globally unique |
+| 2 | `aws_s3_bucket` | Holds `telemetry/` input and `processed/` output |
+| 3 | `aws_s3_bucket_public_access_block` | All four public-access blocks enabled |
+| 4 | `aws_sns_topic` | Alert channel |
+| 5 | `aws_sns_topic_subscription` | Email subscription (must be confirmed once) |
+| 6 | `aws_cloudwatch_log_group` | Lambda logs with 7-day retention |
+| 7 | `aws_iam_role` | Execution role assumed only by Lambda |
+| 8 | `aws_iam_role_policy` | Least-privilege permissions (see below) |
+| 9 | `aws_lambda_function` | Python 3.12, 256 MB, 30 s timeout, code packaged from `src/processor` |
+| 10 | `aws_lambda_permission` | Allows S3 to invoke the function |
+| 11 | `aws_s3_bucket_notification` | Trigger on `telemetry/*.csv` object creation |
 
-These rules are demonstration thresholds. A real monitoring solution would need equipment-specific limits, time-window handling, false-positive evaluation, alert escalation, and validation with operational experts.
+**Inputs:** `alert_email` (required), `project` (default `solar-monitoring`).
+**Outputs:** `bucket_name`, `lambda_name`, `sns_topic_arn`.
+**State:** stored in a separate, versioned, private S3 bucket with encryption and lock file (`use_lockfile = true`).
 
-## Example Processing Results
+---
 
-A successful test run using the current synthetic dataset returned the following results:
+## Security design
 
-| Metric | Result |
-|---|---:|
-| Telemetry rows processed | 3,452 |
-| Total anomaly records detected | 25 |
-| `ZERO_POWER` records | 12 |
-| `HIGH_TEMPERATURE` records | 12 |
-| `MISSING_TELEMETRY` records | 1 |
+| Control | Implementation |
+|---|---|
+| Private storage | S3 Block Public Access enabled on both the data bucket and the state bucket |
+| Least privilege | Lambda role can only: read `telemetry/*`, write `processed/*`, publish to one SNS topic, write to one log group |
+| No secrets in code | No access keys, tokens or `.env` files in the repository |
+| Git hygiene | `*.tfvars`, `*.tfstate`, `.terraform/`, `*.zip` and raw screenshots are git-ignored |
+| State protection | Versioned and encrypted state bucket with locking |
+| Cost guardrails | AWS Budget alert, 7-day log retention, no VPC or NAT gateway |
 
-The counts describe **anomaly records**, not necessarily distinct or deduplicated operational incidents. The current workflow writes a new incident CSV on each execution rather than maintaining a historical incident database.
+---
 
-## AWS Implementation
+## Processing logic and data model
 
-### Amazon S3
+### Input columns (CSV)
 
-The bucket stores the input and output objects using separate prefixes:
+| Column | Description |
+|---|---|
+| `timestamp` | Reading time |
+| `site_id`, `inverter_id` | Synthetic site and inverter identifiers |
+| `ac_power_kw` | AC output power |
+| `dc_voltage_v` | DC voltage |
+| `inverter_temp_c` | Inverter temperature |
+| `ghi_w_m2` | Solar irradiance |
+| `energy_kwh_interval` | Energy for the interval |
+| `expected_scenario` | Label used by the synthetic data generator |
 
-```text
-telemetry/solar_telemetry.csv
-processed/incident_results.csv
-```
+### Detection rules (demonstration thresholds)
 
-Keep S3 Block Public Access enabled. The input prefix is intended for telemetry uploads, while the output prefix stores the processed incident register.
+| Incident type | Condition | Severity |
+|---|---|---|
+| `ZERO_POWER` | Irradiance at least 200 W/m² and AC power at most 1 kW | HIGH |
+| `HIGH_TEMPERATURE` | Inverter temperature at least 80 °C | HIGH |
+| `MISSING_TELEMETRY` | Gap above 5 minutes between consecutive readings of the same site and inverter | MEDIUM |
 
-### AWS Lambda
+These thresholds are illustrative. A production system would need equipment-specific limits, time windows and false-positive review.
 
-The `SolarTelemetryProcessor` function:
+### Output columns (`processed/<name>_incidents.csv`)
 
-- Reads the configured input CSV from S3.
-- Parses timestamps and numeric telemetry fields.
-- Evaluates zero-power and high-temperature conditions.
-- Detects gaps between consecutive readings per site and inverter.
-- Writes the incident register to S3.
-- Publishes a summary through SNS when anomaly records are present and the topic is configured.
-- Writes diagnostic and execution output to CloudWatch Logs.
+`timestamp, site_id, inverter_id, incident_type, severity, detail`
 
-### Amazon SNS
+---
 
-The `SolarMonitoringAlerts` topic delivers an email summary to its confirmed subscription. The notification includes the number of telemetry rows processed and a breakdown of detected anomaly records.
+## Tested results
 
-### Amazon CloudWatch Logs
+Deployed with Terraform in `ap-south-1` and tested end to end:
 
-CloudWatch Logs can be used to review Lambda execution output, identify permission or configuration failures, and verify whether processing ran after an S3 upload.
+| Check | Result |
+|---|---|
+| Terraform apply | 11 resources added, 0 changed, 0 destroyed |
+| Rows processed | 3,452 |
+| Rows skipped | 0 |
+| Incident records | 25 (12 `HIGH_TEMPERATURE`, 12 `ZERO_POWER`, 1 `MISSING_TELEMETRY`) |
+| Trigger | Automatic: output file appeared in `processed/` within seconds of upload |
+| Alert | Email received through SNS |
+| Lambda duration | About 433 ms (936 ms billed, including initialisation) |
+| Memory used | About 100 MB of 256 MB |
+| Unit tests | 15 passing |
+| Clean-up | `terraform destroy` removes all resources |
 
-### IAM and Security
+Counts describe incident **records**, not de-duplicated operational incidents.
 
-The Lambda execution role should use least-privilege permissions for the required S3 read/write actions and SNS publishing. Resource ARNs should be scoped to the relevant bucket prefixes and topic where practical.
+---
 
-Do not place AWS access keys, secret keys, session tokens, or private credentials in source code or GitHub.
+## Screenshots
 
-## Power BI Dashboard
+**Infrastructure created by Terraform**
 
-The Power BI report, `Solar_Asset_Performance_Dashboard.pbix`, presents the incident register through:
+![Terraform apply](reports/screenshots/terraform_apply.png)
 
-- **Total Detected Anomalies** KPI
-- **High Severity Incidents** KPI
-- **Medium Severity Incidents** KPI
-- Incident distribution by type
-- Incident distribution by site
-- Incident details table with timestamp, site, inverter, incident type, and severity
-- Site slicer
-- Severity slicer
-- Date-range slicer
+**Input file in S3 (`telemetry/`)**
 
-### Expected KPI values for the sample output
+![S3 input](reports/screenshots/s3_input.png)
 
-| KPI | Expected value |
-|---|---:|
-| Total anomaly records | 25 |
-| High severity records | 24 |
-| Medium severity records | 1 |
+**Incident register written by Lambda (`processed/`)**
 
-The dashboard filters were tested against the current sample incident CSV. In this implementation, the processed CSV is downloaded from S3 and imported into Power BI Desktop; the report does not automatically refresh when the S3 object changes.
+![S3 output](reports/screenshots/s3_output.png)
 
-## Run the Local Python Workflow
+**Lambda execution log (rows, skipped, incidents)**
+
+![Lambda execution](reports/screenshots/lambda_execution.png)
+
+**Email alert delivered through SNS**
+
+![SNS alert](reports/screenshots/sns_alert.png)
+
+---
+
+## Run it yourself
 
 ### Prerequisites
 
-- Python 3 installed and available from the terminal.
-- The repository cloned or downloaded locally.
-- The project's Python scripts and data paths reviewed for your environment.
+- An AWS account with an IAM user and `aws configure` completed (region `ap-south-1`)
+- AWS CLI v2, Terraform 1.10 or newer, Python 3.12 or newer, Git
+- An email address that can receive the SNS confirmation
 
-### Generate synthetic telemetry
-
-From the repository root:
+### 1. Clone
 
 ```bash
-python scripts/generate_data.py
+git clone https://github.com/<your-username>/solar-asset-monitoring.git
+cd solar-asset-monitoring
 ```
 
-### Validate the dataset
+### 2. Create the Terraform state bucket (one time)
+
+Choose a globally unique name. PowerShell:
+
+```powershell
+$STATE_BUCKET = "solar-tfstate-<unique-suffix>"
+aws s3api create-bucket --bucket $STATE_BUCKET --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+aws s3api put-bucket-versioning --bucket $STATE_BUCKET --versioning-configuration Status=Enabled
+aws s3api put-public-access-block --bucket $STATE_BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+```
+
+Then put the same name in the `backend "s3"` block of `terraform/versions.tf`.
+
+### 3. Set your alert email
+
+Create `terraform/terraform.tfvars` (git-ignored):
+
+```hcl
+alert_email = "you@example.com"
+```
+
+### 4. Deploy
+
+```powershell
+cd terraform
+terraform init
+terraform validate
+terraform plan
+terraform apply
+```
+
+Expected: `Plan: 11 to add, 0 to change, 0 to destroy.`
+
+### 5. Confirm the email subscription
+
+AWS sends a **Subscription Confirmation** email. Click **Confirm subscription**. Without this, alerts are not delivered.
+
+### 6. Test the pipeline
+
+```powershell
+$BUCKET = terraform output -raw bucket_name
+aws s3 cp ..\data\solar_telemetry.csv s3://$BUCKET/telemetry/
+aws s3 ls s3://$BUCKET/processed/
+aws logs tail /aws/lambda/solar-monitoring-processor --since 10m
+```
+
+On macOS or Linux use `BUCKET=$(terraform output -raw bucket_name)` and forward slashes in paths.
+
+You should see `solar_telemetry_incidents.csv` in `processed/`, a log line with `"rows": 3452` and `"incidents": 25`, and an alert email.
+
+---
+
+## Run the tests
 
 ```bash
-python scripts/validate_data.py
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-### Detect incidents locally
+15 tests: boundary checks for each rule (for example exactly 200 W/m², exactly 80 °C, exactly 5 minutes), unsorted input, per-inverter gap logic, malformed-row handling, CSV output, and handler guards against wrong prefixes and file types.
 
-```bash
-python scripts/detect_incidents.py
+---
+
+## Cost and clean-up
+
+The design stays inside the AWS Free Tier at this scale: Lambda, SNS email, S3 and CloudWatch Logs usage is tiny, logs expire after 7 days, and there is no NAT gateway or VPC. Charges depend on your account and usage, so set an AWS Budget alert.
+
+Delete everything when you finish:
+
+```powershell
+cd terraform
+terraform destroy
 ```
 
-Check the source files for the configured input and output paths before running. If the scripts use absolute Windows paths, update them to use paths relative to the project directory before sharing the repository.
+This removes all 11 resources. The state bucket is created manually, so delete it separately if you no longer need it.
 
-## AWS Deployment Outline
+---
 
-1. Create a private S3 bucket and keep Block Public Access enabled.
-2. Upload the synthetic telemetry CSV under the `telemetry/` prefix.
-3. Deploy the Lambda processor using a supported Python runtime.
-4. Configure environment variables for the bucket, input key, output key, and SNS topic ARN where the code expects them.
-5. Attach a least-privilege execution role that permits reading the input object, writing the output object, and publishing to the selected SNS topic.
-6. Create an SNS topic and confirm the email subscription.
-7. Configure an S3 object-created notification for the intended `telemetry/` prefix and `.csv` suffix.
-8. Test processing and review CloudWatch Logs.
-9. Download the processed incident CSV and import it into Power BI Desktop.
+## Design decisions
 
-Ensure the deployed handler is compatible with the event that invokes it. A handler that reads a fixed input key must be adapted if it is expected to process arbitrary uploaded filenames from S3 events. Avoid notification configurations that could cause output files to trigger the same function repeatedly.
+| Decision | Reason |
+|---|---|
+| Rules separated from the Lambda handler (`rules.py`) | Pure functions are easy to unit test without AWS |
+| Handler reads bucket and key from the S3 event | Works for any uploaded file instead of one hard-coded name |
+| Separate `telemetry/` and `processed/` prefixes with a filtered trigger | Prevents recursive invocations |
+| Terraform with remote state, versioning and locking | Safe, repeatable and recoverable infrastructure |
+| Inline least-privilege IAM policy scoped to prefixes | Limits the impact of any misconfiguration |
+| 7-day log retention | Keeps storage and cost minimal |
+| Lambda outside a VPC | No NAT gateway cost and no networking needed for S3 and SNS |
+| `force_destroy = true` on the data bucket | Lets `terraform destroy` clean up a demo environment completely |
 
-AWS charges depend on account terms, credits, resource configuration, and usage. Review billing and remove unused resources.
+---
 
-## Security and Repository Hygiene
+## Known limitations
 
-- Keep S3 buckets private.
-- Never commit AWS credentials, secret keys, tokens, `.env` files, or local AWS credential files.
-- Remove personal email addresses and sensitive account information from screenshots.
-- Do not publish employer/client data or real operational telemetry.
-- Review all files before committing them to a public repository.
-- Use least-privilege IAM policies.
-- Check AWS billing and clean up resources that are no longer needed.
+- Synthetic data and demonstration thresholds only.
+- The incident file is overwritten per input file; there is no persistent, de-duplicated incident history yet.
+- Power BI is refreshed by manually importing the incident CSV.
+- There is no dead-letter queue or error alarm yet, so a failed invocation is only visible in CloudWatch Logs.
+- Deployment is manual (`terraform apply` from a laptop) until the CI/CD pipeline is added.
 
-## Current Scope and Future Enhancements
+---
 
-Potential future enhancements include:
+## Roadmap
 
-- Automated unit tests for each anomaly rule.
-- Incident deduplication and persistent historical storage.
-- Detection of missing readings at the start and end of a monitoring window.
-- More robust validation for malformed timestamps and numeric fields.
-- Structured logging, retries, and clearer error handling.
-- A secure automated refresh path for Power BI.
-- A deployment guide, architecture diagram, and AWS resource-cleanup checklist.
-- Threshold tuning and evaluation against real operational requirements before real-world use.
+- [x] Event-driven S3 to Lambda to SNS pipeline
+- [x] Infrastructure as Code with Terraform and remote state
+- [x] Unit tests for processing logic
+- [x] Least-privilege IAM and private S3
+- [ ] **GitHub Actions CI/CD**: pytest, `terraform fmt`, `validate` and `plan` on pull requests; `terraform apply` on merge to `main`
+- [ ] **OIDC authentication** from GitHub to AWS (no stored access keys)
+- [ ] **DynamoDB** for idempotent, persistent incident history
+- [ ] **CloudWatch alarm** on Lambda errors with SNS notification
+- [ ] **SQS dead-letter queue** for failed invocations
+- [ ] Architecture diagram export and short demo recording
 
-## Skills Demonstrated
+---
 
-Python, data validation, CSV processing, anomaly detection, AWS S3, AWS Lambda, Amazon SNS, IAM, CloudWatch Logs, event-driven architecture, Power BI, DAX, dashboard design, and technical documentation.
+## Skills demonstrated
 
-## Portfolio Summary
+AWS (S3, Lambda, SNS, IAM, CloudWatch), Terraform and Infrastructure as Code, event-driven architecture, serverless design, least-privilege security, Python, pytest, Git and GitHub, observability and structured logging, cost control on the AWS Free Tier, Power BI and DAX reporting, technical documentation.
 
-Built a cloud-based solar asset monitoring demonstration using synthetic telemetry. Implemented Python anomaly detection with AWS Lambda, stored incident results in Amazon S3, sent anomaly summaries through Amazon SNS, and developed a Power BI dashboard featuring severity KPIs, incident analysis, and interactive filters.
+---
+
+## Troubleshooting
+
+| Problem | Likely cause and fix |
+|---|---|
+| `terraform init` cannot reach `registry.terraform.io` | DNS or network issue. Flush DNS, set DNS to 8.8.8.8 and 1.1.1.1, or use another network |
+| `Reference to undeclared resource` | A `.tf` file is missing or unsaved (for example `main.tf`) |
+| No alert email | The SNS subscription was not confirmed. Click the link in the confirmation email, then upload the CSV again |
+| Nothing in `processed/` | Upload to the `telemetry/` prefix with a `.csv` extension, then check the CloudWatch log group |
+| `BucketAlreadyExists` for the state bucket | Bucket names are global. Choose a different suffix |
+| `Repository not found` on `git push` | Wrong username or repository name in the remote URL. Check `git remote -v` |
+
+---
+
+## Author
+
+**Rushikesh Gokhe**: Cloud, DevOps and Python automation
+[LinkedIn](https://linkedin.com/in/rushikeshgokhe) · [GitHub](https://github.com/rushikeshgokhe)
