@@ -1,0 +1,43 @@
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type destroy to delete all project resources"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-main
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Terraform destroy
+    if: ${{ github.event.inputs.confirm == 'destroy' }}
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Terraform destroy
+        working-directory: terraform
+        run: terraform destroy -auto-approve -input=false -lock-timeout=60s
