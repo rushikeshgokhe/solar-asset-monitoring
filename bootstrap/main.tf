@@ -171,3 +171,42 @@ output "github_actions_role_arn" {
   description = "Put this in the GitHub secret AWS_ROLE_ARN"
   value       = aws_iam_role.github_actions.arn
 }
+
+# ---------- Extra deploy permissions for Step 9 (DynamoDB, SQS, alarms) ----------
+data "aws_iam_policy_document" "reliability" {
+  statement {
+    sid       = "ProjectDynamo"
+    actions   = ["dynamodb:*"]
+    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/solar-monitoring-*"]
+  }
+
+  statement {
+    sid       = "ProjectSqs"
+    actions   = ["sqs:*"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:solar-monitoring-*"]
+  }
+
+  statement {
+    sid = "ProjectAlarms"
+    actions = [
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:ListTagsForResource",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+    ]
+    resources = ["arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:solar-monitoring-*"]
+  }
+
+  statement {
+    sid       = "AlarmsDescribe"
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_reliability" {
+  name   = "solar-monitoring-terraform-reliability"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.reliability.json
+}

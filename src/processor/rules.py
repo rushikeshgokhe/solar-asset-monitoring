@@ -2,7 +2,7 @@
 import csv
 import io
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 ZERO_POWER_MIN_GHI = 200.0   # W/m2
 ZERO_POWER_MAX_KW = 1.0      # kW
@@ -94,3 +94,20 @@ def summarize(total_rows, skipped, incidents):
              f"Anomaly records: {len(incidents)}"]
     lines += [f"  {k}: {v}" for k, v in sorted(counts.items())]
     return "\n".join(lines)
+
+
+def to_item(incident, source_key, ingested_at=None):
+    """Turn an incident into a DynamoDB item.
+
+    The key (pk + sk) identifies the incident itself, so writing the same
+    incident twice overwrites it instead of creating a duplicate.
+    """
+    if ingested_at is None:
+        ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return {
+        "pk": f"{incident['site_id']}#{incident['inverter_id']}",
+        "sk": f"{incident['timestamp']}#{incident['incident_type']}",
+        **incident,
+        "source_key": source_key,
+        "ingested_at": ingested_at,
+    }
