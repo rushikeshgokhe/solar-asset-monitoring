@@ -25,7 +25,7 @@ provider "aws" {
 variable "github_repo" {
   type        = string
   description = "GitHub repository allowed to assume the role (owner/name)"
-  default     = "rushikeshgokhe/solar-asset-monitoring"
+  default     = "rushikeshgokhe@224395846/solar-asset-monitoring@1428061775"
 }
 
 variable "state_bucket" {
