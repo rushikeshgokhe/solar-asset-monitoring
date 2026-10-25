@@ -1,4 +1,5 @@
-"""Lambda entry point: S3 object-created event -> incident CSV in processed/ + SNS summary."""
+"""Lambda entry point: S3 object-created event -> incident CSV in processed/,
+incident history in DynamoDB, and an SNS summary."""
 import json
 import logging
 import os
@@ -16,10 +17,33 @@ OUTPUT_PREFIX = "processed/"
 
 _s3 = boto3.client("s3")
 _sns = boto3.client("sns")
+_dynamodb = None
 
 
 def _log(**kw):
     logger.info(json.dumps(kw))
+
+
+def _table():
+    """Return the incidents table, or None when INCIDENTS_TABLE is not set."""
+    global _dynamodb
+    name = os.environ.get("INCIDENTS_TABLE")
+    if not name:
+        return None
+    if _dynamodb is None:
+        _dynamodb = boto3.resource("dynamodb")
+    return _dynamodb.Table(name)
+
+
+def store_items(items):
+    """Write items to DynamoDB. Same key = overwrite, so reruns never duplicate."""
+    table = _table()
+    if table is None or not items:
+        return 0
+    with table.batch_writer(overwrite_by_pkeys=["pk", "sk"]) as batch:
+        for item in items:
+            batch.put_item(Item=item)
+    return len(items)
 
 
 def process_object(bucket, key):
@@ -33,6 +57,8 @@ def process_object(bucket, key):
                    Body=rules.incidents_to_csv(incidents).encode("utf-8"),
                    ContentType="text/csv")
 
+    stored = store_items([rules.to_item(i, key) for i in incidents])
+
     summary = rules.summarize(len(rows), skipped, incidents)
     topic = os.environ.get("SNS_TOPIC_ARN")
     if incidents and topic:
@@ -40,9 +66,9 @@ def process_object(bucket, key):
                      Message=f"File: s3://{bucket}/{key}\n{summary}")
 
     _log(event="processed", key=key, out_key=out_key, rows=len(rows),
-         skipped=skipped, incidents=len(incidents))
+         skipped=skipped, incidents=len(incidents), stored=stored)
     return {"key": key, "out_key": out_key, "rows": len(rows),
-            "skipped": skipped, "incidents": len(incidents)}
+            "skipped": skipped, "incidents": len(incidents), "stored": stored}
 
 
 def handler(event, context):
