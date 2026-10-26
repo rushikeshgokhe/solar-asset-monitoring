@@ -31,7 +31,7 @@ jobs:
     needs: test
     env:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}   # referenced so GitHub masks it in logs
+      ACCOUNT_ID_MASK: ${{ secrets.AWS_ACCOUNT_ID }}   # referenced so GitHub masks it in logs
     steps:
       - uses: actions/checkout@v4
 
