@@ -96,10 +96,9 @@ resource "aws_lambda_function" "processor" {
   filename         = data.archive_file.lambda.output_path
   source_code_hash = data.archive_file.lambda.output_base64sha256
 
-    environment {
+  environment {
     variables = {
       SNS_TOPIC_ARN   = aws_sns_topic.alerts.arn
-      INCIDENTS_TABLE = aws_dynamodb_table.incidents.name
       INCIDENTS_TABLE = aws_dynamodb_table.incidents.name
     }
   }
