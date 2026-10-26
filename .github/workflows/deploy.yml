@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      ACCOUNT_ID_MASK: ${{ secrets.AWS_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 

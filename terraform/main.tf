@@ -98,7 +98,8 @@ resource "aws_lambda_function" "processor" {
 
   environment {
     variables = {
-      SNS_TOPIC_ARN = aws_sns_topic.alerts.arn
+      SNS_TOPIC_ARN   = aws_sns_topic.alerts.arn
+      INCIDENTS_TABLE = aws_dynamodb_table.incidents.name
     }
   }
 
