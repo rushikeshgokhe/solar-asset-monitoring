@@ -467,33 +467,6 @@ This removes all 16 resources. The state bucket is created manually, so delete i
 
 ---
 
-## Known limitations
-
-- Synthetic data and demonstration thresholds only.
-- The incident CSV is overwritten per input file; the DynamoDB table holds the full de-duplicated history.
-- Power BI is refreshed by manually importing the incident CSV.
-- The dead-letter queue is not drained automatically; failed events need manual inspection and replay.
-- One deploy role serves both pull-request plans and applies on `main`. A stricter design would give pull requests a read-only role.
-
----
-
-## Roadmap
-
-- [x] Event-driven S3 to Lambda to SNS pipeline
-- [x] Infrastructure as Code with Terraform and remote state
-- [x] Unit tests for processing logic
-- [x] Least-privilege IAM and private S3
-- [x] **GitHub Actions CI/CD**: pytest, `terraform fmt`, `validate` and `plan` on pull requests; `terraform apply` on merge to `main`
-- [x] **OIDC authentication** from GitHub to AWS (no stored access keys)
-- [x] **DynamoDB** for idempotent, persistent incident history
-- [x] **CloudWatch alarm** on Lambda errors with SNS notification
-- [x] **SQS dead-letter queue** for failed invocations
-- [ ] Read-only deploy role for pull requests
-- [ ] Dashboard that reads directly from DynamoDB
-- [ ] Short demo recording
-
----
-
 ## Skills demonstrated
 
 AWS (S3, Lambda, SNS, SQS, DynamoDB, IAM, CloudWatch), Terraform and Infrastructure as Code, GitHub Actions CI/CD with OIDC, event-driven architecture, serverless design, least-privilege security, Python, pytest, Git and GitHub, observability and structured logging, cost control on the AWS Free Tier, Power BI and DAX reporting, technical documentation.
