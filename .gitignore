@@ -9,3 +9,9 @@ __pycache__/
 *.tfvars
 *.tfvars
 reports/screenshots/Screenshot*.png
+
+# Python virtual environment
+.venv/
+
+
+data/incoming/
