@@ -238,6 +238,9 @@ data "aws_iam_policy_document" "automation" {
       "lambda:GetEventSourceMapping",
       "lambda:ListEventSourceMappings",
       "lambda:UpdateEventSourceMapping",
+      "lambda:ListTags",
+      "lambda:TagResource",
+      "lambda:UntagResource",
     ]
     resources = ["*"]
   }
