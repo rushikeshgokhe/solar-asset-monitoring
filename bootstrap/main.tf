@@ -1,35 +1,3 @@
-# ---------- Extra deploy permissions for EventBridge, SSM & SQS Event Source Mapping ----------
-data "aws_iam_policy_document" "automation" {
-  statement {
-    sid       = "ProjectEvents"
-    actions   = ["events:*"]
-    resources = ["arn:aws:events:${local.region}:${local.account_id}:rule/solar-monitoring-*"]
-  }
-
-  statement {
-    sid       = "ProjectSsm"
-    actions   = ["ssm:*"]
-    resources = ["arn:aws:ssm:${local.region}:${local.account_id}:parameter/solar-monitoring/*"]
-  }
-
-  statement {
-    sid = "ProjectEventSourceMappings"
-    actions = [
-      "lambda:CreateEventSourceMapping",
-      "lambda:DeleteEventSourceMapping",
-      "lambda:GetEventSourceMapping",
-      "lambda:ListEventSourceMappings",
-      "lambda:UpdateEventSourceMapping",
-    ]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "github_actions_automation" {
-  name   = "solar-monitoring-terraform-automation"
-  role   = aws_iam_role.github_actions.id
-  policy = data.aws_iam_policy_document.automation.json
-}
 terraform {
   required_version = ">= 1.10"
 
@@ -240,4 +208,43 @@ resource "aws_iam_role_policy" "github_actions_reliability" {
   name   = "solar-monitoring-terraform-reliability"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.reliability.json
+}
+
+# ---------- Extra deploy permissions for EventBridge, SSM & SQS Event Source Mapping ----------
+data "aws_iam_policy_document" "automation" {
+  statement {
+    sid       = "ProjectEvents"
+    actions   = ["events:*"]
+    resources = ["arn:aws:events:${local.region}:${local.account_id}:rule/solar-monitoring-*"]
+  }
+
+  statement {
+    sid       = "ProjectSsm"
+    actions   = ["ssm:*"]
+    resources = ["arn:aws:ssm:${local.region}:${local.account_id}:parameter/solar-monitoring/*"]
+  }
+
+  statement {
+    sid       = "ProjectSsmDescribe"
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "ProjectEventSourceMappings"
+    actions = [
+      "lambda:CreateEventSourceMapping",
+      "lambda:DeleteEventSourceMapping",
+      "lambda:GetEventSourceMapping",
+      "lambda:ListEventSourceMappings",
+      "lambda:UpdateEventSourceMapping",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_automation" {
+  name   = "solar-monitoring-terraform-automation"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.automation.json
 }
