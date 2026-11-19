@@ -1,2 +1,6 @@
 pytest
 boto3
+fastapi
+uvicorn[standard]
+requests
+moto[dynamodb]
