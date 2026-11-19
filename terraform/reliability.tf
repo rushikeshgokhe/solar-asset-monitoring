@@ -26,7 +26,15 @@ resource "aws_sqs_queue" "dlq" {
 # ---------- Extra permissions for the Lambda role ----------
 data "aws_iam_policy_document" "reliability" {
   statement {
-    actions   = ["dynamodb:PutItem", "dynamodb:BatchWriteItem"]
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:ConditionCheckItem",
+    ]
     resources = [aws_dynamodb_table.incidents.arn]
   }
 
