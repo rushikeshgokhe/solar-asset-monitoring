@@ -1,6 +1,5 @@
 [README_final.md](https://github.com/user-attachments/files/34068054/README_final.md)
 
-$readme = @'
 # Solar Asset Monitoring Platform on AWS
 
 ![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20Lambda%20%7C%20DynamoDB%20%7C%20SQS%20%7C%20SNS%20%7C%20EventBridge%20%7C%20SSM-FF9900?logo=amazonaws&logoColor=white)
