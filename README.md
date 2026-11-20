@@ -1,16 +1,17 @@
 [README_final.md](https://github.com/user-attachments/files/34068054/README_final.md)
 
+$readme = @'
 # Solar Asset Monitoring Platform on AWS
 
-![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20Lambda%20%7C%20SNS%20%7C%20CloudWatch-FF9900?logo=amazonaws&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20Lambda%20%7C%20DynamoDB%20%7C%20SQS%20%7C%20SNS%20%7C%20EventBridge%20%7C%20SSM-FF9900?logo=amazonaws&logoColor=white)
 ![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions%20%2B%20OIDC-2088FF?logo=githubactions&logoColor=white)
 ![Region](https://img.shields.io/badge/region-ap--south--1-informational)
 
 An **event-driven, serverless monitoring pipeline** for solar inverter telemetry, provisioned entirely with **Terraform**.
-Uploading a CSV to S3 triggers a Python Lambda function that validates and analyses the data, writes an incident register back to S3, and sends an email summary through Amazon SNS.
+Scheduled synthetic telemetry generation (or uploading a CSV to S3) triggers a Python Lambda pipeline that validates and analyses the data, correlates recurring faults across a **15-minute sliding window** in **DynamoDB**, writes an incident register back to S3, sends an email summary through Amazon SNS, and asynchronously dispatches **Jira maintenance tickets** via **SQS** and **SSM Parameter Store**.
 Every change is tested and deployed automatically by **GitHub Actions**, which signs in to AWS with **OpenID Connect (OIDC)**, so no AWS access keys are stored anywhere.
 
 > **Data notice:** this project uses **synthetic** solar telemetry only. It contains no employer, client or real operational data.
@@ -48,12 +49,12 @@ Every change is tested and deployed automatically by **GitHub Actions**, which s
 
 Solar asset operators receive large volumes of inverter data and need to spot problems quickly. This project shows how to build that workflow with cloud-native building blocks and DevOps practices:
 
-- **Serverless and event-driven**: no servers to manage; processing starts when a file arrives.
+- **Serverless and event-driven**: no servers to manage; scheduled EventBridge ingestion and S3 event notifications start processing automatically.
 - **Infrastructure as Code**: the whole environment is created and destroyed with Terraform, so it is repeatable and reviewable.
-- **Least-privilege security**: private storage and narrowly scoped IAM permissions.
+- **Least-privilege security**: private storage, encrypted SSM secrets, and narrowly scoped IAM permissions per Lambda.
 - **Observable**: structured JSON logs in CloudWatch and email alerts through SNS.
-- **Reliable**: failed events land in a dead-letter queue, a CloudWatch alarm emails on errors, and incident history is stored in DynamoDB without duplicates.
-- **Tested**: the processing logic is separated from AWS code and covered by unit tests.
+- **Reliable**: failed events land in dead-letter queues, a CloudWatch alarm emails on errors, recurring faults correlate across 15-minute windows in DynamoDB without duplicates, and Jira ticket creation is decoupled via SQS.
+- **Tested**: the processing logic is separated from AWS code and covered by 61 unit and integration tests.
 
 ---
 
@@ -61,13 +62,20 @@ Solar asset operators receive large volumes of inverter data and need to spot pr
 
 ```mermaid
 flowchart LR
-    U["Telemetry CSV"] -->|"upload"| S3IN["S3 bucket<br/>telemetry/ prefix"]
-    S3IN -->|"ObjectCreated event<br/>prefix telemetry/ and suffix .csv"| L["AWS Lambda<br/>Python 3.12"]
+    EB["EventBridge<br/>rate(5 minutes)"] -->|"scheduled trigger"| GEN["Lambda: Generator<br/>Python 3.12"]
+    GEN -->|"writes CSV"| S3IN["S3 bucket<br/>telemetry/ prefix"]
+    U["Telemetry CSV"] -->|"upload"| S3IN
+    S3IN -->|"ObjectCreated event<br/>prefix telemetry/ and suffix .csv"| L["AWS Lambda: Processor<br/>Python 3.12"]
     L -->|"writes incident CSV"| S3OUT["S3 bucket<br/>processed/ prefix"]
     L -->|"publishes summary"| SNS["Amazon SNS topic"]
     SNS --> M["Email alert"]
     L -->|"JSON logs"| CW["CloudWatch Logs<br/>7-day retention"]
-    L -->|"stores incidents"| DDB["DynamoDB<br/>idempotent items"]
+    L -->|"TransactWriteItems<br/>15-min correlation"| DDB["DynamoDB<br/>EVENT + INCIDENT items"]
+    L -->|"enqueues new incidents"| SQS["SQS tickets queue"]
+    SQS -->|"event source mapping"| TPROC["Lambda: Ticket Processor<br/>Python 3.12"]
+    SSM["SSM Parameter Store<br/>SecureString"] -.->|"Jira credentials"| TPROC
+    TPROC -->|"creates issue"| JIRA["Jira Cloud REST API"]
+    TPROC -.->|"failed after 3 retries"| TDLQ["SQS ticket dead-letter queue"]
     L -.->|"failed after 2 retries"| DLQ["SQS dead-letter queue"]
     L -.->|"Errors metric"| ALARM["CloudWatch alarm"]
     ALARM -->|"notifies"| SNS
@@ -76,7 +84,6 @@ flowchart LR
     TF -.-> L
     TF -.-> SNS
     TF -.-> CW
-```
 
 ---
 
