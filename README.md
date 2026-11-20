@@ -1,6 +1,6 @@
 [README_final.md](https://github.com/user-attachments/files/34068054/README_final.md)
 
-# Solar Asset Monitoring Platform on AWS
+# Cloud-Native Solar Asset Monitoring & Intelligent Incident Automation Platform
 
 ![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20Lambda%20%7C%20SNS%20%7C%20CloudWatch-FF9900?logo=amazonaws&logoColor=white)
 ![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)
