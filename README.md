@@ -46,7 +46,7 @@ The platform follows an event-driven, serverless architecture.
 
 ```mermaid
 flowchart TD
-    A[Amazon EventBridge<br/>Every 5 Minutes] --> B[Telemetry Generator Lambda]
+    A[Amazon EventBridge<br/>Every 5 Minutes - Optional] --> B[Telemetry Generator Lambda]
     B --> C[Amazon S3<br/>telemetry/]
 
     C -->|ObjectCreated Event| D[Telemetry Processor Lambda]
@@ -59,18 +59,18 @@ flowchart TD
     H --> I[Amazon S3<br/>processed/]
     H --> J[Amazon DynamoDB<br/>EVENT and INCIDENT]
     H --> K[Amazon SNS<br/>Email Summary]
-    H --> L[Amazon SQS<br/>Ticket Queue]
+    H -->|Open & Closed Events| L[Amazon SQS<br/>Ticket Queue]
 
     L --> M[Ticket Processor Lambda]
     M --> N[AWS SSM Parameter Store<br/>Jira Credentials]
-    M --> O[Jira Cloud REST API]
-    M --> J
+    M --> O[Jira Cloud REST API<br/>Create & Comment]
+    M <-->|Idempotency & Ticket Key| J
 
-    D -.-> P[Processor Dead-Letter Queue]
-    M -.-> Q[Ticket Dead-Letter Queue]
+    D -.->|On Async Failure| P[Processor Dead-Letter Queue]
+    L -.->|After 3 Retries| Q[Ticket Dead-Letter Queue]
 
-    D --> R[Amazon CloudWatch]
-    B --> R
+    B --> R[Amazon CloudWatch]
+    D --> R
     M --> R
     R --> S[CloudWatch Error Alarm]
     S --> K
