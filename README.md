@@ -1,96 +1,125 @@
-# Solar Asset Monitoring & Incident Automation Platform
+# Cloud-Native Solar Asset Monitoring & Intelligent Incident Automation Platform
 
-An end-to-end, serverless AWS platform that automates solar inverter telemetry generation, ingestion, anomaly detection, incident correlation, recovery tracking, notifications, and Jira maintenance ticket integration.
+**A serverless, event-driven monitoring and incident automation platform built using AWS, Python, Terraform, GitHub Actions and Jira Cloud.**
 
-**Repository:** [github.com/rushikeshgokhe/solar-asset-monitoring](https://github.com/rushikeshgokhe/solar-asset-monitoring)
+The platform automates solar telemetry ingestion, anomaly detection, incident correlation, recovery tracking, notifications and maintenance ticket creation.
 
-![AWS](https://img.shields.io/badge/AWS-Cloud-orange)
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![Terraform](https://img.shields.io/badge/IaC-Terraform-purple)
-![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-black)
-![Tests](https://img.shields.io/badge/Tests-61_passing-brightgreen)
-![Architecture](https://img.shields.io/badge/Architecture-Serverless-blue)
+**Repository:** [solar-asset-monitoring](https://github.com/rushikeshgokhe/solar-asset-monitoring)
 
 ---
 
 ## 1. Project Overview
 
-Solar power plants contain multiple sites, inverters, and monitoring devices that continuously generate operational telemetry. Monitoring these devices manually can make it difficult to identify equipment faults, investigate recurring problems, track incidents, and coordinate maintenance activities.
+Solar power plants consist of multiple sites, inverters and data loggers that continuously generate operational telemetry. Identifying equipment abnormalities and coordinating maintenance activities across these assets can involve significant manual monitoring and incident management.
 
-This project demonstrates an automated monitoring and incident management workflow using Python and AWS serverless services.
+This project addresses that challenge through a cloud-native, serverless architecture that automates the monitoring and incident management workflow.
 
-The platform generates simulated telemetry for multiple solar sites, uploads it to Amazon S3, processes the incoming data through AWS Lambda, detects operational anomalies using predefined rules, and groups recurring faults into meaningful incident episodes.
+Simulated solar telemetry is generated and uploaded to Amazon S3, where event-driven AWS Lambda functions validate incoming data, detect operational anomalies and manage incident lifecycles. Amazon DynamoDB maintains event and incident records, while Amazon SNS provides notifications.
 
-It also maintains incident state in Amazon DynamoDB, evaluates recovery conditions, sends notification summaries through Amazon SNS, and places actionable incidents into Amazon SQS for asynchronous Jira ticket integration.
+For maintenance automation, incident events are processed asynchronously through Amazon SQS and integrated with Jira Cloud to create and track maintenance issues.
 
-The infrastructure is provisioned using Terraform, while GitHub Actions automates testing, infrastructure validation, deployment, and controlled teardown.
+The infrastructure is provisioned using Terraform, with GitHub Actions providing automated validation and deployment through AWS OIDC authentication.
 
-### Key objectives
+### Key Capabilities
 
-- Automate solar telemetry generation and ingestion.
-- Detect operational anomalies from inverter readings.
-- Reduce duplicate alerts through incident correlation.
-- Maintain incident history and lifecycle state.
-- Identify when an inverter has recovered.
-- Integrate maintenance ticket processing with Jira.
-- Build a reliable, event-driven AWS architecture.
-- Automate infrastructure provisioning through Terraform.
-- Implement CI/CD using GitHub Actions and AWS OIDC.
-- Keep cloud resources controlled through an explicit teardown workflow.
+- Automated telemetry generation and S3 ingestion.
+- Python-based data validation and anomaly detection.
+- Incident correlation and duplicate protection.
+- Incident lifecycle and recovery management.
+- Persistent event and incident storage using DynamoDB.
+- Automated email notifications using SNS.
+- Asynchronous maintenance ticket automation using SQS and Jira Cloud.
+- Failure handling through retries and dead-letter queues.
+- Infrastructure provisioning using Terraform.
+- CI/CD automation using GitHub Actions and AWS OIDC.
 
 ---
 
 ## 2. Architecture
 
-The platform follows an event-driven, serverless architecture.
+The application follows an event-driven architecture that separates telemetry ingestion, incident processing and maintenance ticket automation.
+
+### Architecture Diagram
 
 ```mermaid
-flowchart TD
-    A[Amazon EventBridge<br/>Every 5 Minutes - Optional] --> B[Telemetry Generator Lambda]
-    B --> C[Amazon S3<br/>telemetry/]
+flowchart TB
 
-    C -->|ObjectCreated Event| D[Telemetry Processor Lambda]
+    subgraph A["Telemetry Ingestion"]
+        EB["Amazon EventBridge<br/>Optional Scheduled Trigger"]
+        GEN["Telemetry Generator Lambda"]
+        S3IN[("Amazon S3<br/>telemetry/")]
 
-    D --> E[CSV Validation]
-    E --> F[Rule-Based Anomaly Detection]
-    F --> G[15-Minute Incident Normalizer]
-    G --> H[Recovery Evaluation]
+        EB --> GEN
+        GEN --> S3IN
+    end
 
-    H --> I[Amazon S3<br/>processed/]
-    H --> J[Amazon DynamoDB<br/>EVENT and INCIDENT]
-    H --> K[Amazon SNS<br/>Email Summary]
-    H -->|Open & Closed Events| L[Amazon SQS<br/>Ticket Queue]
+    subgraph B["Incident Processing"]
+        PROC["Telemetry Processor Lambda"]
+        VALID["CSV Validation"]
+        DETECT["Rule-Based Anomaly Detection"]
+        NORMAL["Incident Correlation<br/>15-Minute Window"]
+        RECOVERY["Recovery Evaluation"]
 
-    L --> M[Ticket Processor Lambda]
-    M --> N[AWS SSM Parameter Store<br/>Jira Credentials]
-    M --> O[Jira Cloud REST API<br/>Create & Comment]
-    M <-->|Idempotency & Ticket Key| J
+        S3OUT[("Amazon S3<br/>processed/")]
+        DDB[("Amazon DynamoDB<br/>EVENT and INCIDENT")]
+        SNS["Amazon SNS<br/>Notifications"]
 
-    D -.->|On Async Failure| P[Processor Dead-Letter Queue]
-    L -.->|After 3 Retries| Q[Ticket Dead-Letter Queue]
+        PROC --> VALID
+        VALID --> DETECT
+        DETECT --> NORMAL
+        NORMAL --> RECOVERY
+        RECOVERY --> S3OUT
+        RECOVERY --> DDB
+        RECOVERY --> SNS
+    end
 
-    B --> R[Amazon CloudWatch]
-    D --> R
-    M --> R
-    R --> S[CloudWatch Error Alarm]
-    S --> K
+    S3IN -->|"ObjectCreated Event"| PROC
+
+    subgraph C["Maintenance Ticket Automation"]
+        QUEUE[["Amazon SQS<br/>Ticket Queue"]]
+        TICKET["Ticket Processor Lambda"]
+        SSM[("SSM Parameter Store<br/>SecureString")]
+        JIRA["Jira Cloud REST API"]
+
+        QUEUE --> TICKET
+        TICKET --> SSM
+        TICKET --> JIRA
+        TICKET <-->|"Ticket State"| DDB
+        QUEUE -.->|"After 3 Receive Attempts"| DLQ2[["Ticket DLQ"]]
+    end
+
+    RECOVERY -->|"Incident Events"| QUEUE
+
+    subgraph D["Monitoring and Failure Handling"]
+        CW["Amazon CloudWatch"]
+        ALARM["CloudWatch Error Alarm"]
+        DLQ1[["Processor DLQ"]]
+
+        PROC -.-> DLQ1
+        GEN --> CW
+        PROC --> CW
+        TICKET --> CW
+        CW --> ALARM
+        ALARM --> SNS
+    end
 ```
 
-### Architecture workflow
+### Processing Flow
 
-1. Amazon EventBridge triggers the telemetry generator every five minutes.
-2. The generator creates a timestamped CSV batch containing simulated inverter readings.
-3. The CSV file is uploaded to the `telemetry/` prefix of an Amazon S3 bucket.
-4. An S3 ObjectCreated event invokes the telemetry processor Lambda.
-5. The processor validates the incoming records and applies anomaly detection rules.
-6. The incident normalizer groups recurring faults within a 15-minute correlation window.
-7. The recovery engine evaluates healthy telemetry and updates incident status.
-8. Processed incident reports are stored in the S3 `processed/` prefix.
-9. Event and incident records are maintained in DynamoDB.
-10. Amazon SNS sends an email summary.
-11. Actionable incident messages are placed in an SQS ticket queue.
-12. The ticket processor retrieves Jira credentials from SSM Parameter Store and integrates with Jira Cloud.
-13. CloudWatch collects execution logs and monitors Lambda errors.
+1. The telemetry generator creates simulated inverter readings.
+2. Generated CSV files are uploaded to the S3 `telemetry/` prefix.
+3. S3 ObjectCreated events invoke the telemetry processor Lambda.
+4. Incoming data is validated and evaluated against anomaly detection rules.
+5. Related detections are correlated into normalized incidents.
+6. Incident and event records are persisted in DynamoDB.
+7. Recovery logic evaluates active incidents against consecutive healthy readings.
+8. SNS sends processing and incident notifications.
+9. Incident events are delivered to an SQS ticket queue.
+10. The ticket processor Lambda communicates with Jira Cloud and maintains ticket state.
+11. CloudWatch captures execution logs and monitors application errors.
+12. Failed messages are isolated through configured dead-letter queues.
+
+EventBridge supports optional scheduled telemetry generation.
 
 ---
 
@@ -98,399 +127,197 @@ flowchart TD
 
 | Category | Technologies |
 |---|---|
-| Programming language | Python |
-| Cloud platform | Amazon Web Services |
-| Object storage | Amazon S3 |
-| Serverless compute | AWS Lambda |
-| Scheduling | Amazon EventBridge |
-| Database | Amazon DynamoDB |
-| Messaging | Amazon SQS |
+| Cloud Platform | AWS |
+| Serverless Compute | AWS Lambda |
+| Object Storage | Amazon S3 |
+| NoSQL Database | Amazon DynamoDB |
+| Message Queue | Amazon SQS |
 | Notifications | Amazon SNS |
-| Monitoring | Amazon CloudWatch |
-| Secrets management | AWS Systems Manager Parameter Store |
-| External integration | Jira Cloud REST API |
+| Event Scheduling | Amazon EventBridge |
+| Monitoring and Logging | Amazon CloudWatch |
+| Credential Management | AWS Systems Manager Parameter Store |
+| Programming Language | Python |
+| Ticket Management | Jira Cloud REST API |
 | Infrastructure as Code | Terraform |
 | CI/CD | GitHub Actions |
-| Authentication | GitHub Actions OIDC |
-| Testing | Pytest |
-| Data format | CSV |
-| Version control | Git and GitHub |
+| Cloud Authentication | AWS IAM and OIDC |
+| Automated Testing | Pytest |
+| Version Control | Git and GitHub |
 
 ---
 
-## 4. System Components
+## 4. Application Components
 
-### 4.1 Automated Telemetry Generator
+### 4.1 Telemetry Generation and Ingestion
 
-**AWS services:** Amazon EventBridge, AWS Lambda, Amazon S3
+A Python-based generator produces simulated solar inverter telemetry in CSV format.
 
-The telemetry generator removes the need to depend on a continuously running local data-generation server.
+**Simulation environment:**
 
-An EventBridge scheduled rule triggers the generator Lambda every five minutes.
+- 4 solar sites.
+- 3 inverters per site.
+- 12 inverters overall.
+- 5-minute telemetry intervals.
 
-The generator creates realistic timestamped CSV batches for:
+The generated files are uploaded to Amazon S3, which acts as the entry point for the event-driven processing pipeline.
 
-- 4 solar sites
-- 12 inverters
-- Multiple operational readings
-- Normal and simulated fault conditions
+### 4.2 Data Validation and Anomaly Detection
 
-The generated readings include:
+The telemetry processor validates incoming CSV files before applying predefined operational detection rules.
 
-- Timestamp
-- Site ID
-- Inverter ID
-- AC power
-- DC voltage
-- Inverter temperature
-- Global horizontal irradiance (GHI)
-- Interval energy
+The implemented anomaly categories are:
 
-The generated CSV batches are uploaded to the S3 `telemetry/` prefix.
-
-### 4.2 Data Validation
-
-**Component:** `src/processor/rules.py`
-
-Before anomaly detection, the processor validates incoming CSV records.
-
-The validation process checks the required columns:
-
-- `timestamp`
-- `site_id`
-- `inverter_id`
-- `ac_power_kw`
-- `dc_voltage_v`
-- `inverter_temp_c`
-- `ghi_w_m2`
-- `energy_kwh_interval`
-
-Malformed records are skipped safely, and the processor tracks the number of skipped rows.
-
-### 4.3 Rule-Based Anomaly Detection
-
-The platform uses predefined operational rules to identify potential inverter faults.
-
-It does not use machine learning or AI for anomaly detection.
-
-| Anomaly | Severity | Detection condition |
+| Anomaly Type | Detection Rule | Severity |
 |---|---|---|
-| ZERO_POWER | HIGH | Irradiance ≥ 200 W/m² and AC power ≤ 1 kW |
-| HIGH_TEMPERATURE | HIGH | Inverter temperature ≥ 80°C |
-| MISSING_TELEMETRY | MEDIUM | Reading gap greater than 5 minutes for the same site and inverter |
+| ZERO_POWER | GHI >= 200 W/m² and AC power <= 1 kW | HIGH |
+| HIGH_TEMPERATURE | Inverter temperature >= 80°C | HIGH |
+| MISSING_TELEMETRY | Telemetry gap greater than 5 minutes | MEDIUM |
 
-These rules demonstrate how operational telemetry can be converted into actionable monitoring events.
+The detection engine uses Python-based threshold rules rather than machine learning.
 
-### 4.4 Incident Correlation and Normalization
+### 4.3 Incident Correlation and Lifecycle Management
 
-**Component:** `src/processor/normalizer.py`
+Repeated anomaly detections are evaluated using a 15-minute correlation window.
 
-A single equipment fault can generate repeated anomaly detections across multiple telemetry batches.
+This allows the system to group related detections into an ongoing incident instead of unnecessarily creating a separate incident for every repeated observation.
 
-Creating a separate incident for every repeated detection would increase alert volume and create unnecessary maintenance work.
+The incident lifecycle is managed through:
 
-To address this, the platform implements a 15-minute sliding correlation window.
+**NEW → OPEN → RESOLVED**
 
-Recurring faults with the same:
+The recovery module evaluates consecutive healthy telemetry readings before resolving an active incident.
 
-- Site ID
-- Inverter ID
-- Incident type
+### 4.4 Event and Incident Persistence
 
-are grouped into one incident episode when they occur within the correlation window.
+Amazon DynamoDB stores application event and incident records.
 
-The normalizer:
+The data model separates individual anomaly events from normalized incident records.
 
-- Preserves the original `first_detected` timestamp.
-- Updates `last_detected`.
-- Increments `occurrence_count`.
-- Protects timestamps from moving backwards when events arrive out of order.
-- Maintains incident state across telemetry batches.
+Conditional and transactional operations support consistent updates and duplicate protection.
 
-The incident lifecycle is:
+### 4.5 Maintenance Ticket Automation
 
-```text
-NEW → OPEN → RESOLVED
-```
+The ticket automation workflow integrates AWS event processing with Jira Cloud.
 
-A new episode can be created when the same fault occurs outside the correlation window or after an earlier episode has been resolved.
+Incident events are delivered to Amazon SQS and consumed by the dedicated ticket processor Lambda.
 
-### 4.5 DynamoDB Incident Repository
+The processor:
 
-**Component:** `src/processor/incident_repository.py`
+- Retrieves Jira credentials from SSM Parameter Store SecureString.
+- Communicates with Jira Cloud through its REST API.
+- Creates or updates maintenance issues.
+- Tracks ticket-processing state in DynamoDB.
+- Uses asynchronous processing to isolate ticket automation from telemetry ingestion.
 
-Amazon DynamoDB stores event and incident information in a single-table design.
+**Verified Jira execution:**
 
-Two item types are maintained.
+| Jira Issue | Incident | Severity |
+|---|---|---|
+| KAN-5 | ZERO_POWER - SITE-104 - INV-03 | HIGH |
+| KAN-6 | HIGH_TEMPERATURE - SITE-102 - INV-01 | HIGH |
 
-**EVENT items**
+These issues were created automatically through the AWS-to-Jira integration workflow.
 
-Used to track individual anomaly events and prevent duplicate processing.
+### 4.6 Notifications and Failure Handling
 
-| Attribute | Description |
-|---|---|
-| `pk` | Site and inverter identifier |
-| `sk` | Event type and event timestamp |
-| Event attributes | Information about the detected event |
+Amazon SNS sends email notifications containing telemetry processing summaries and incident information.
 
-Example key structure:
+Amazon SQS decouples maintenance ticket processing from the main telemetry workflow.
 
-```text
-pk = SITE-101#INV-01
-sk = EVENT#ZERO_POWER#2026-11-21T10:00:00Z
-```
+Dead-letter queues isolate messages that cannot be processed successfully after the configured retry attempts.
 
-**INCIDENT items**
-
-Used to maintain consolidated incident episodes.
-
-| Attribute | Description |
-|---|---|
-| `pk` | Site and inverter identifier |
-| `sk` | Incident type and episode start |
-| `occurrence_count` | Number of correlated detections |
-| `ticket_created` | Jira ticket creation tracking |
-| Incident state | NEW, OPEN, or RESOLVED |
-
-Example key structure:
-
-```text
-pk = SITE-101#INV-01
-sk = INCIDENT#ZERO_POWER#2026-11-21T10:00:00Z
-```
-
-### 4.6 Idempotency and Duplicate Protection
-
-Amazon S3 event notifications provide at-least-once delivery behavior. Therefore, the same object event may be delivered more than once.
-
-The project implements duplicate protection using DynamoDB transactional writes.
-
-The repository uses `TransactWriteItems` with a conditional expression:
-
-```python
-ConditionExpression="attribute_not_exists(pk)"
-```
-
-This prevents the same event from being stored repeatedly.
-
-Duplicate processing does not inflate the incident occurrence count or generate duplicate ticket-queue messages.
-
-### 4.7 Automatic Recovery Detection
-
-**Component:** `src/processor/recovery.py`
-
-Detecting a fault is only one part of equipment monitoring. The system also needs to determine when the equipment returns to healthy operation.
-
-The recovery engine evaluates healthy readings for the matching inverter across telemetry batches.
-
-When the recovery criteria are satisfied, an open incident is transitioned to:
-
-```text
-RESOLVED
-```
-
-If the same fault occurs again later, the system can create a new incident episode instead of incorrectly reusing the resolved one.
-
-### 4.8 Asynchronous Jira Ticket Integration
-
-**Component:** `src/ticket_processor/handler.py`
-
-The platform separates incident processing from external maintenance ticket creation.
-
-When a new actionable incident is identified, the processor places a message into:
-
-```text
-solar-monitoring-tickets
-```
-
-A separate ticket processor Lambda consumes messages from this SQS queue.
-
-This design prevents external Jira API latency and temporary failures from directly blocking telemetry processing.
-
-The ticket processor:
-
-1. Reads the incident message from SQS.
-2. Checks DynamoDB to determine whether a ticket has already been created.
-3. Retrieves Jira credentials from AWS Systems Manager Parameter Store.
-4. Calls the Jira Cloud REST API.
-5. Creates the maintenance issue.
-6. Updates the DynamoDB incident record with `ticket_created = true`.
-
-Jira credentials are stored as encrypted `SecureString` parameters rather than hardcoded in the application.
-
-The implementation also uses conditional DynamoDB updates to protect ticket creation against message retries.
-
-### 4.9 Notifications with Amazon SNS
-
-Amazon SNS provides email notifications containing processing summaries and detected incident information.
-
-The processor publishes a human-readable summary after processing the telemetry batch.
-
-CloudWatch error alarms are also connected to SNS for operational notifications.
-
-### 4.10 Resilience with Amazon SQS Dead-Letter Queues
-
-The architecture uses separate queues for normal ticket processing and failed-message handling.
-
-| Queue | Purpose |
-|---|---|
-| `solar-monitoring-tickets` | Normal maintenance ticket messages |
-| `solar-monitoring-dlq` | Failed telemetry processor invocations |
-| `solar-monitoring-ticket-dlq` | Failed ticket processor messages |
-
-The processor failure queue is configured with two retries.
-
-The ticket queue uses `maxReceiveCount = 3` before a message is moved to its dead-letter queue.
-
-This helps isolate failures and supports later investigation.
+CloudWatch provides centralized execution logs and error monitoring.
 
 ---
 
-## 5. AWS Infrastructure
+## 5. AWS Infrastructure and Design
 
-The infrastructure is provisioned using Terraform.
+The infrastructure is designed around managed AWS services to reduce operational overhead and support independent processing components.
+
+| Service | Implementation |
+|---|---|
+| Amazon S3 | Raw telemetry and processed results |
+| AWS Lambda | Generator, telemetry processor and ticket processor |
+| Amazon DynamoDB | Event, incident and ticket-state persistence |
+| Amazon SQS | Asynchronous ticket processing |
+| Amazon SNS | Incident and error notifications |
+| Amazon EventBridge | Optional scheduled execution |
+| Amazon CloudWatch | Logs, metrics and error monitoring |
+| AWS IAM | Service permissions and access control |
+| AWS Systems Manager | Secure Jira credential storage |
 
 **AWS Region:** `ap-south-1` (Mumbai)
 
-The application stack defines 24 AWS resources when deployed.
+### Infrastructure as Code
 
-The architecture includes:
+Terraform manages the AWS application infrastructure.
 
-- S3 bucket and event notification configuration
-- Three Lambda functions
-- EventBridge scheduling
-- DynamoDB incident table
-- SNS notification topic
-- SQS ticket queue
-- Separate dead-letter queues
-- Lambda event source mapping
-- CloudWatch log groups
-- CloudWatch error alarm
-- IAM roles and policies
-- Required permissions and integrations
+The infrastructure configuration includes compute resources, storage, messaging, database, notification, monitoring and IAM components.
 
-The three Lambda functions are:
+A separate S3 backend is used for Terraform remote state management with native state locking.
 
-| Lambda function | Responsibility |
+Infrastructure can be deployed and destroyed through controlled Terraform and GitHub Actions workflows.
+
+---
+
+## 6. CI/CD and Deployment Automation
+
+GitHub Actions automates application validation and infrastructure workflows.
+
+### Workflow Files
+
+| Workflow | Responsibility |
 |---|---|
-| `solar-monitoring-generator` | Generates and uploads telemetry |
-| `solar-monitoring-processor` | Validates data, detects anomalies, manages incidents |
-| `solar-monitoring-ticket-processor` | Processes SQS messages and integrates with Jira |
+| `ci.yml` | Python tests and Terraform validation |
+| `deploy.yml` | AWS infrastructure deployment |
+| `destroy.yml` | Controlled infrastructure teardown |
 
-CloudWatch log groups are configured with a seven-day retention period.
+### CI Pipeline
 
-Separate least-privilege IAM roles are used for the generator, processor, and ticket processor.
+The CI workflow includes:
 
-S3 input and output prefixes are isolated to prevent processed files from recursively triggering the input processor.
+- Python environment setup.
+- Dependency installation.
+- Automated Pytest execution.
+- Terraform formatting validation.
+- Terraform initialization and validation.
+- Terraform plan generation.
 
----
+### AWS Authentication
 
-## 6. Terraform and Infrastructure Management
+GitHub Actions uses AWS IAM OIDC federation to obtain temporary AWS credentials.
 
-The project uses Terraform to define and manage AWS infrastructure.
+This avoids depending on long-lived AWS access keys stored in repository secrets.
 
-The infrastructure is divided into two parts.
+### Infrastructure Lifecycle
 
-### Bootstrap stack
+A dedicated destroy workflow supports controlled removal of application resources after testing and demonstrations.
 
-The bootstrap stack provisions the resources required for Terraform remote state and GitHub Actions authentication.
-
-It includes:
-
-- Remote Terraform state S3 bucket: `solar-tfstate-epcrkb`
-- Native Terraform state lockfile support using `use_lockfile = true`
-- GitHub Actions OIDC identity provider
-- IAM role for GitHub Actions
-
-The GitHub Actions trust policy is restricted to the project repository.
-
-### Application stack
-
-The application stack provisions the AWS resources required to run the monitoring platform.
-
-The Terraform configuration is organized across files including:
-
-```text
-bootstrap/main.tf
-terraform/main.tf
-terraform/reliability.tf
-terraform/automation.tf
-```
-
-The application stack is designed to be deployed and destroyed through controlled workflows.
-
-**Important:** Destroying the application stack does not automatically mean the separate bootstrap resources, including the Terraform state bucket and OIDC resources, have also been deleted.
+Terraform bootstrap resources, including remote state infrastructure, are managed separately.
 
 ---
 
-## 7. CI/CD with GitHub Actions
+## 7. Reliability and Engineering Practices
 
-The project uses GitHub Actions to automate testing, infrastructure validation, and deployment.
+The platform incorporates engineering practices intended to improve reliability and maintainability.
 
-Three workflows are configured under:
-
-```text
-.github/workflows/
-```
-
-### CI workflow — `ci.yml`
-
-Runs on pull requests.
-
-The workflow performs:
-
-- Python automated tests using Pytest.
-- Terraform formatting checks.
-- Terraform configuration validation.
-- Terraform plan.
-
-### Deployment workflow — `deploy.yml`
-
-Runs on merges to the `main` branch.
-
-It:
-
-1. Runs the automated test suite.
-2. Authenticates to AWS through GitHub Actions OIDC.
-3. Executes Terraform deployment.
-
-Static AWS access keys are not stored in GitHub for this authentication workflow.
-
-### Destroy workflow — `destroy.yml`
-
-Provides a manually gated infrastructure teardown process.
-
-The workflow requires a destroy confirmation input before proceeding.
-
-This helps prevent accidental infrastructure deletion.
-
-### CI/CD workflow diagram
-
-```mermaid
-flowchart TD
-    A[Developer Push / Pull Request] --> B[GitHub Actions CI]
-    B --> C[Run Pytest]
-    C --> D[Terraform Format Check]
-    D --> E[Terraform Validate]
-    E --> F[Terraform Plan]
-
-    F --> G{Changes merged to main?}
-    G -->|Yes| H[Deployment Workflow]
-    G -->|No| I[Review Results]
-
-    H --> J[AWS Authentication using OIDC]
-    J --> K[Terraform Apply]
-    K --> L[AWS Infrastructure Deployed]
-
-    M[Manual Destroy Workflow] --> N[Destroy Confirmation]
-    N --> O[Terraform Destroy]
-```
+| Engineering Practice | Implementation |
+|---|---|
+| Event-driven processing | S3 event notifications and Lambda |
+| Incident correlation | 15-minute correlation window |
+| Duplicate protection | DynamoDB conditional and transactional operations |
+| Recovery management | Consecutive healthy-reading evaluation |
+| Asynchronous execution | Amazon SQS |
+| Failure isolation | Dead-letter queues |
+| Retry handling | Configured SQS redrive policy |
+| Secure authentication | IAM and GitHub OIDC |
+| Credential protection | SSM Parameter Store SecureString |
+| Infrastructure management | Terraform |
+| Automated validation | GitHub Actions and Pytest |
 
 ---
 
 ## 8. Project Structure
-
-The following are the principal paths documented for the project:
 
 ```text
 solar-asset-monitoring/
@@ -501,399 +328,201 @@ solar-asset-monitoring/
 │       ├── deploy.yml
 │       └── destroy.yml
 │
-├── bootstrap/
-│   └── main.tf
-│
-├── terraform/
-│   ├── main.tf
-│   ├── reliability.tf
-│   └── automation.tf
-│
 ├── src/
 │   ├── generator/
-│   │   └── handler.py
-│   │
 │   ├── processor/
-│   │   ├── rules.py
-│   │   ├── normalizer.py
-│   │   ├── incident_repository.py
-│   │   └── recovery.py
-│   │
 │   └── ticket_processor/
-│       └── handler.py
 │
-├── reports/
-│   └── screenshots/
+├── data/
+│
+├── terraform/
 │
 ├── tests/
 │
-├── README.md
-└── requirements.txt
+├── reports/
+│   └── screenshots/
+│       ├── 06-jira-ticket-kan5.png
+│       └── 07-jira-ticket-kan6.png
+│
+├── requirements.txt
+├── requirements-dev.txt
+├── pytest.ini
+├── .gitignore
+└── README.md
 ```
-
-This is a high-level view of the principal components. Refer to the repository for the complete current file structure.
 
 ---
 
-## 9. Sample Anomaly Detection Results
+## 9. Testing and Execution Results
 
-The project includes a historical sample telemetry dataset containing 3,452 readings.
+Pytest is used to validate the application's processing and business logic.
 
-The documented verification run reported:
+The test suite covers:
+
+- Telemetry validation.
+- Anomaly detection.
+- Incident normalization.
+- Incident correlation.
+- Repository operations.
+- Duplicate event handling.
+- Recovery evaluation.
+- Ticket processing logic.
+
+**Latest recorded automated test result: 61 passed.**
+
+### Historical Dataset Results
+
+A historical simulated telemetry dataset contained 3,452 records.
 
 | Metric | Result |
 |---|---:|
-| Telemetry rows processed | 3,452 |
-| Skipped rows | 0 |
+| Telemetry records | 3,452 |
+| Solar sites | 4 |
+| Inverters | 12 |
 | ZERO_POWER detections | 12 |
 | HIGH_TEMPERATURE detections | 12 |
 | MISSING_TELEMETRY detections | 1 |
-| Total raw anomaly detections | 25 |
+| Total anomaly detections | 25 |
 
-These detections represent three consolidated incident groups in the sample scenario:
+The anomaly detections were processed through the incident normalization workflow.
 
-| Site | Inverter | Incident type | Occurrences | Severity |
-|---|---|---|---:|---|
-| SITE-104 | INV-03 | ZERO_POWER | 12 | HIGH |
-| SITE-102 | INV-02 | HIGH_TEMPERATURE | 12 | HIGH |
-| SITE-103 | INV-01 | MISSING_TELEMETRY | 1 | MEDIUM |
+### November 19, 2026 - AWS Processing Evidence
 
-The resulting incident register is exported to the S3 `processed/` prefix in CSV format.
+A successful AWS execution generated the following SNS notification:
 
-The CSV output can be used for further analysis and Power BI reporting.
+| Metric | Result |
+|---|---:|
+| Records processed | 12 |
+| Records skipped | 0 |
+| Anomaly records | 2 |
+| HIGH_TEMPERATURE | 1 |
+| ZERO_POWER | 1 |
+| Normalized OPEN incidents | 2 |
 
----
+**Detected incidents:**
 
-## 10. Reliability and Engineering Considerations
+- SITE-102 / INV-01 — HIGH_TEMPERATURE
+- SITE-104 / INV-03 — ZERO_POWER
 
-The platform demonstrates several important cloud engineering practices.
+This execution demonstrates successful telemetry processing, anomaly detection, incident normalization and SNS notification.
 
-### Event-driven processing
+### November 21, 2026 - Jira Integration Evidence
 
-S3 ObjectCreated notifications trigger telemetry processing without requiring a continuously running server.
+The end-to-end Jira workflow was verified through actual maintenance issue creation.
 
-### Idempotent processing
+| Jira Issue | Incident Description | Severity |
+|---|---|---|
+| KAN-5 | ZERO_POWER - SITE-104 - INV-03 | HIGH |
+| KAN-6 | HIGH_TEMPERATURE - SITE-102 - INV-01 | HIGH |
 
-DynamoDB conditional and transactional writes protect against duplicate event processing.
+The issues were created through the `solar-monitoring-ticket-processor` Lambda after receiving incident events from SQS.
 
-### Incident correlation
+The corresponding ticket information and processing state were persisted in DynamoDB.
 
-A 15-minute window consolidates repeated detections into meaningful incident episodes.
+Additional recorded verification scenarios include:
 
-### Out-of-order event handling
+- Cross-batch incident correlation.
+- New incident creation after recovery.
+- Duplicate event replay handling.
+- Recovery state transitions.
+- SQS message processing and queue draining.
+- Dead-letter queue monitoring.
 
-The normalizer protects incident timestamps from moving backwards when events arrive out of order.
-
-### Independent ticket processing
-
-SQS decouples maintenance ticket creation from the telemetry processing workflow.
-
-### Retry and failure handling
-
-Separate dead-letter queues capture failed processor and ticket messages.
-
-### Least-privilege IAM
-
-Separate execution roles are used for the three Lambda functions.
-
-### Secure credential management
-
-Jira credentials are stored in SSM Parameter Store as encrypted SecureString parameters.
-
-### Monitoring and observability
-
-CloudWatch logs and error alarms provide visibility into system execution and failures.
+**Verification note:** These AWS execution results are from previous deployments and test sessions. The application infrastructure was intentionally destroyed after testing to control ongoing AWS costs.
 
 ---
 
-## 11. Automated Testing
+## 10. Security and Cost Management
 
-The project uses Pytest to test the Python processing and incident-management logic.
+### Security
 
-The latest engineering verification notes report:
+Security practices implemented in the project include:
 
-**61 automated unit and integration tests passing.**
+- IAM roles for AWS service access.
+- Least-privilege permissions where configured.
+- GitHub Actions OIDC authentication.
+- Temporary AWS credentials for CI/CD.
+- Jira credentials stored in SSM Parameter Store SecureString.
+- Sensitive configuration files excluded through `.gitignore`.
+- Terraform-managed infrastructure configuration.
 
-The test coverage includes the main application behaviors:
+### Cost Management
 
-- Telemetry validation
-- Anomaly detection rules
-- Incident normalization
-- Cross-batch correlation
-- Duplicate event protection
-- Incident repository behavior
-- Recovery detection
-- Incident lifecycle management
-- Ticket processing logic
+The platform uses serverless and managed AWS services to avoid maintaining continuously running compute infrastructure.
 
-The CI workflow also performs Terraform formatting, validation, and planning checks.
+Cost-conscious practices include:
 
-Run the tests locally from the project root:
+- Lambda-based execution.
+- S3 object storage.
+- DynamoDB on-demand capacity.
+- Asynchronous SQS processing.
+- Controlled infrastructure deployment.
+- Infrastructure teardown after testing.
 
-```powershell
-python -m pytest -q
-```
-
-For detailed test output:
-
-```powershell
-python -m pytest -v
-```
+The application infrastructure was intentionally destroyed after verification. Terraform bootstrap resources and retained CloudWatch logs may be managed separately.
 
 ---
 
-## 12. Deployment Overview
+## 11. Engineering Challenges
 
-The project is designed to use Terraform for AWS infrastructure provisioning.
+The project involved addressing several practical cloud engineering challenges:
 
-Before deployment, the required AWS account, Terraform backend, GitHub OIDC configuration, repository secrets or variables, and Jira integration settings must be configured.
+**Duplicate Event Processing:** Implemented idempotency and conditional database operations to reduce duplicate records and unnecessary ticket actions.
 
-### General deployment sequence
+**Incident Correlation:** Designed a time-based correlation mechanism to group repeated anomaly detections into ongoing incidents.
 
-1. Configure the AWS account and required permissions.
-2. Provision the Terraform bootstrap infrastructure.
-3. Configure GitHub Actions OIDC authentication.
-4. Configure the required Terraform variables.
-5. Configure Jira credentials in SSM Parameter Store.
-6. Run the CI workflow.
-7. Deploy the application stack using the deployment workflow.
-8. Verify the Lambda functions, S3 events, DynamoDB table, queues, SNS topic, and CloudWatch resources.
-9. Verify telemetry processing and incident creation.
-10. Verify Jira integration using an actionable incident.
+**Recovery Tracking:** Implemented consecutive healthy-reading evaluation to prevent premature incident resolution.
 
-The exact Terraform variable values and environment-specific settings should be taken from the current Terraform configuration and repository setup instructions. Do not commit credentials, tokens, or Terraform secret variable files.
+**Asynchronous Ticket Processing:** Used SQS to separate maintenance ticket automation from telemetry processing.
+
+**Secure CI/CD Authentication:** Implemented GitHub Actions OIDC authentication instead of relying on long-lived AWS credentials.
+
+**Infrastructure Cost Control:** Used Terraform and a dedicated teardown workflow to manage the application resource lifecycle.
 
 ---
 
-## 13. Verification and Testing Evidence
+## 12. Limitations and Future Enhancements
 
-The engineering handover documents an end-to-end verification run in AWS region `ap-south-1`.
+The current implementation uses simulated solar telemetry and predefined rule-based anomaly detection.
 
-The reported verification results include:
+Potential future improvements include:
 
-| Verification | Reported result |
-|---|---|
-| Pytest suite | 61 tests passed |
-| Terraform CI checks | Passed |
-| Lambda deployment | Three functions active during verification |
-| Historical telemetry processing | 3,452 rows processed |
-| Raw anomaly detections | 25 |
-| Skipped rows | 0 |
-| Incident correlation | Verified |
-| New episode after 92 minutes | Verified |
-| Recovery transition | Verified |
-| S3 replay duplicate protection | Verified |
-| SQS buffering and draining | Verified |
-| Ticket DLQ after queue-drain test | 0 messages |
-| Application infrastructure teardown | Completed |
-
-### Replay idempotency evidence
-
-The documented S3 replay test produced:
-
-```json
-{
-  "stored": 0,
-  "duplicates": 2,
-  "tickets_queued": 0
-}
-```
-
-This demonstrates that the replayed events were recognized as duplicates in the reported verification run.
-
-### SQS buffering evidence
-
-The documented test verified that four incident messages could remain buffered while the ticket processor was being deployed and that the queue drained to zero after the consumer became available.
-
-The ticket dead-letter queue contained zero messages in that test.
+- Integration with real inverter and data logger APIs.
+- Live telemetry ingestion.
+- Machine-learning-based anomaly detection.
+- Predictive maintenance analytics.
+- Operational dashboards.
+- Advanced incident reporting.
+- Multi-region deployment.
+- Expanded end-to-end integration testing.
 
 ---
 
-## 14. Screenshots and Evidence
+## 13. Project Outcome
 
-Screenshots are maintained in:
+The project demonstrates an end-to-end cloud-native monitoring and incident automation workflow.
 
-```text
-reports/screenshots/
-```
+It brings together:
 
-The engineering handover identifies the following evidence files:
+- Serverless AWS architecture.
+- Python-based telemetry processing.
+- Event and incident persistence.
+- Incident lifecycle and recovery management.
+- Asynchronous Jira maintenance ticket automation.
+- Cloud monitoring and failure handling.
+- Terraform-based infrastructure management.
+- GitHub Actions CI/CD with OIDC.
 
-| Screenshot | Evidence |
-|---|---|
-| `01-github-actions.png` | GitHub Actions CI/CD results |
-| `02-aws-lambda-functions.png` | Three AWS Lambda functions |
-| `03-dynamodb-incidents.png` | DynamoDB EVENT and INCIDENT records |
-| `04-sqs-queues.png` | Ticket and dead-letter queues |
-| `05-cloudwatch-logs.png` | Structured processing and replay logs |
-| `terraform_apply.png` | Terraform provisioning output |
-| `Terraform.png` | Terraform execution evidence |
-| `s3_input.png` | Incoming telemetry files |
-| `s3_output.png` | Processed incident report |
-| `lambda_execution.png` | Lambda execution evidence |
-| `Log_event.png` | CloudWatch log events |
-| `sns_alerts.png` | SNS email notification evidence |
+The implementation demonstrates practical application of Cloud Engineering and DevOps concepts through a domain-specific renewable energy monitoring use case.
 
 ---
 
-## 15. Security Practices
+## Author
 
-Security is an important part of the architecture.
+**Rushikesh V. Gokhe**
 
-The project incorporates:
+Monitoring Analyst | Cloud & DevOps Engineering
 
-- GitHub Actions OIDC authentication instead of static AWS credentials for CI/CD.
-- IAM roles separated by Lambda responsibility.
-- Restricted GitHub OIDC trust conditions for the repository.
-- Encrypted Jira credentials in AWS Systems Manager Parameter Store.
-- No hardcoded Jira tokens in application source code.
-- Separate resource permissions and S3 prefix isolation.
-- Controlled infrastructure deployment and teardown.
+GitHub: [github.com/rushikeshgokhe](https://github.com/rushikeshgokhe)
 
-**Never commit the following to GitHub:**
-
-- AWS access keys or secret keys
-- Jira API tokens
-- `.env` files containing secrets
-- Terraform `.tfvars` files containing sensitive values
-- Terraform state files
-- Private credentials or certificates
-
----
-
-## 16. Cost Management
-
-The architecture uses serverless AWS services and is designed to avoid continuously running compute infrastructure.
-
-The project also includes a controlled teardown workflow to remove the application stack when it is not required.
-
-The documented application teardown confirmed the removal of:
-
-- Active Lambda functions
-- DynamoDB tables
-- SQS queues
-
-The separate Terraform bootstrap stack may retain resources such as the remote state S3 bucket and OIDC infrastructure.
-
-Therefore, application teardown should not be interpreted as proof that every AWS resource has been deleted.
-
-Always check the AWS Billing dashboard and remaining resources before assuming that ongoing costs are zero.
-
----
-
-## 17. Engineering Challenges and Solutions
-
-During implementation, several infrastructure and application issues were encountered and resolved.
-
-| Challenge | Engineering resolution |
-|---|---|
-| GitHub OIDC authentication denied | Inspected CloudTrail and corrected the trust policy using the actual OIDC subject claim. |
-| AWS account ID environment variable conflict | Renamed the workflow masking variable to avoid collision with AWS SDK environment variables. |
-| Terraform refresh permission errors | Added the required read-only Describe permissions while retaining scoped resource permissions for mutations. |
-| Lambda event source mapping permission issue | Added the required Lambda tagging permissions. |
-| S3 self-copy replay test failure | Used `--metadata-directive REPLACE` to generate a valid copy event for replay testing. |
-| Duplicate anomaly events | Implemented DynamoDB transactional writes and conditional expressions. |
-| Repeated incident notifications | Implemented a 15-minute incident correlation window. |
-| Recovery across telemetry batches | Implemented stateful recovery evaluation. |
-| External Jira API dependency | Decoupled ticket processing using Amazon SQS and a separate Lambda consumer. |
-
-These challenges helped demonstrate practical troubleshooting across Python, AWS IAM, Terraform, Lambda, DynamoDB, S3, and GitHub Actions.
-
----
-
-## 18. Business and Operational Value
-
-The project demonstrates how cloud automation can improve solar asset monitoring operations.
-
-### Reduced manual monitoring
-
-Scheduled telemetry generation and event-driven processing demonstrate how monitoring workflows can run without continuously checking files manually.
-
-### Reduced duplicate incidents
-
-Incident correlation consolidates repeated detections into a single episode.
-
-### Better incident visibility
-
-DynamoDB maintains incident history and lifecycle information.
-
-### Recovery tracking
-
-Healthy telemetry can automatically resolve an existing incident.
-
-### Faster maintenance coordination
-
-SQS and Jira integration provide an asynchronous path for maintenance ticket creation.
-
-### Improved reliability
-
-Retry handling, dead-letter queues, conditional writes, and CloudWatch alarms improve the system's ability to handle failures.
-
----
-
-## 19. Learning Outcomes
-
-This project provided practical experience with:
-
-- Designing an event-driven cloud architecture.
-- Building Python-based serverless applications.
-- Processing CSV telemetry data.
-- Implementing rule-based anomaly detection.
-- Managing stateful incident lifecycles.
-- Implementing DynamoDB transactions and conditional writes.
-- Working with S3 event notifications.
-- Building asynchronous workflows with SQS.
-- Integrating external REST APIs.
-- Managing credentials securely with SSM Parameter Store.
-- Monitoring applications with CloudWatch.
-- Defining infrastructure using Terraform.
-- Implementing GitHub Actions CI/CD.
-- Configuring AWS OIDC authentication.
-- Debugging IAM and cloud deployment issues.
-- Writing automated tests with Pytest.
-
----
-
-## 20. Limitations and Future Enhancements
-
-The project is a cloud engineering demonstration built around simulated solar telemetry.
-
-Potential future enhancements include:
-
-- Integration with real solar inverter or data logger APIs.
-- Additional inverter-specific anomaly rules.
-- More advanced incident prioritization.
-- Power BI dashboard automation.
-- Enhanced ticket lifecycle synchronization between Jira and DynamoDB.
-- Additional operational metrics and dashboards.
-- More extensive integration testing against live AWS and Jira environments.
-
-The current anomaly detection implementation is rule-based. Machine learning is not used for fault detection.
-
----
-
-## 21. Project Summary
-
-This project demonstrates an end-to-end solar asset monitoring and incident automation platform built using Python, AWS, Terraform, and GitHub Actions.
-
-It combines automated telemetry generation, event-driven ingestion, anomaly detection, incident correlation, recovery management, persistent storage, notifications, and asynchronous Jira integration.
-
-It also demonstrates important cloud engineering practices such as idempotent processing, least-privilege IAM, OIDC authentication, infrastructure as code, automated testing, monitoring, retry handling, and controlled teardown.
-
-**The primary objective is to demonstrate how a real-world monitoring workflow can be automated using scalable and maintainable cloud-native services.**
-
----
-
-## 22. Author
-
-**Rushikesh Vinod Gokhe**
-
-Electrical Engineering Graduate | Monitoring Analyst | Aspiring Cloud Engineer
-
-**GitHub:** [rushikeshgokhe](https://github.com/rushikeshgokhe)
-
-**Project Repository:** [Solar Asset Monitoring & Incident Automation Platform](https://github.com/rushikeshgokhe/solar-asset-monitoring)
-
----
-
-*Built as a hands-on Cloud Engineering project to demonstrate AWS serverless architecture, Python automation, Terraform infrastructure management, CI/CD, monitoring, and incident automation.*
+Project: [Cloud-Native Solar Asset Monitoring & Intelligent Incident Automation Platform](https://github.com/rushikeshgokhe/solar-asset-monitoring)
